@@ -8,6 +8,11 @@ const id = () => crypto.randomUUID();
 const codeChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const cleanName = (v) => String(v || '').trim().slice(0, 30);
 const cleanText = (v, max = 120) => String(v || '').trim().slice(0, max);
+const normalizeGameCode = (value) => String(value || '')
+  .normalize('NFKC')
+  .toUpperCase()
+  .replace(/[^A-Z0-9]/g, '')
+  .slice(0, 6);
 
 function randomCode(len = 6) {
   const bytes = new Uint8Array(len);
@@ -93,9 +98,12 @@ async function createGame(req, env) {
 
 async function joinGame(req, env) {
   const b = await body(req);
-  const name = cleanName(b.name), code=cleanText(b.code, 8).toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if (!name || !code) return json({error:'Enter your name and game code.'},400);
-  const game = await env.DB.prepare('SELECT * FROM games WHERE code=?').bind(code).first();
+  const name = cleanName(b.name), code = normalizeGameCode(b.code);
+  if (!name) return json({error:'Enter your name.'},400);
+  if (code.length !== 6) return json({error:'Enter the full 6-character game code.'},400);
+  // Be forgiving of codes pasted with spaces/dashes and of records created by
+  // an older deployment with inconsistent casing or surrounding whitespace.
+  const game = await env.DB.prepare('SELECT * FROM games WHERE upper(trim(code))=?').bind(code).first();
   if (!game) return json({error:'Game code not found.'},404);
   if (game.status !== 'lobby') return json({error:'That game has already started.'},409);
   const count = await env.DB.prepare('SELECT COUNT(*) c FROM players WHERE game_id=?').bind(game.id).first();
